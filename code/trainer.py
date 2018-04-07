@@ -16,6 +16,7 @@ from miscc.losses import discriminator_loss, generator_loss, KL_loss
 
 import time
 
+
 class condGANTrainer(object):
     def __init__(self, output_dir, data_loader, n_words, ixtoword):
         if cfg.TRAIN.FLAG:
@@ -44,14 +45,14 @@ class condGANTrainer(object):
 
         image_encoder = CNN_ENCODER(cfg.TEXT.EMBEDDING_DIM)
         img_encoder_path = cfg.TRAIN.NET_E.replace('text_encoder', 'image_encoder')
-        state_dict = torch.load(img_encoder_path, map_location=lambda storage, loc:storage)
+        state_dict = torch.load(img_encoder_path, map_location=lambda storage, loc: storage)
         image_encoder.load_state_dict(state_dict)
         for p in image_encoder.parameters():
             p.requires_grad = False
         print('Load image encoder from: ', img_encoder_path)
         image_encoder.eval()
 
-        text_encoder = RNN_ENCODER(self.n_words, nhidden = cfg.TEXT.EMBEDDING_DIM)
+        text_encoder = RNN_ENCODER(self.n_words, nhidden=cfg.TEXT.EMBEDDING_DIM)
         state_dict = torch.load(cfg.TRAIN.NET_E, map_location=lambda storage, loc: storage)
         text_encoder.load_state_dict(state_dict)
         for p in text_encoder.parameters():
@@ -63,7 +64,7 @@ class condGANTrainer(object):
 
         netsD = []
         if cfg.GAN.B_DCGAN:
-            if cfg.TREE.BRANCH_NUM ==1:
+            if cfg.TREE.BRANCH_NUM == 1:
                 from model import D_NET64 as D_NET
             elif cfg.TREE.BRANCH_NUM == 2:
                 from model import D_NET128 as D_NET
@@ -91,7 +92,7 @@ class condGANTrainer(object):
         epoch = 0
 
         if cfg.TRAIN.NET_G != '':
-            state_dict = torch.load(cfg.TRAIN.NET_G, map_location= lambda storage, loc:storage)
+            state_dict = torch.load(cfg.TRAIN.NET_G, map_location=lambda storage, loc: storage)
             netG.load_state_dict(state_dict)
             print('Load G from: ', cfg.TRAIN.NET_G)
             istart = cfg.TRAIN.NET_G.rfind('_') + 1
@@ -105,7 +106,7 @@ class condGANTrainer(object):
                     Dname = '%s/netD%d.pth' % (s_tmp, i)
                     print('Load D from: ', Dname)
                     state_dict = \
-                        torch.load(Dname, map_location= lambda storage, loc:storage)
+                        torch.load(Dname, map_location=lambda storage, loc: storage)
                     netsD[i].load_state_dict(state_dict)
 
         if cfg.CUDA:
@@ -148,7 +149,7 @@ class condGANTrainer(object):
         backup_para = copy_G_params(netG)
         load_params(netG, avg_param_G)
         torch.save(netG.state_dict(),
-                   '%s/netG_epoch_%d.pth' %(self.model_dir, epoch))
+                   '%s/netG_epoch_%d.pth' % (self.model_dir, epoch))
         load_params(netG, backup_para)
 
         for i in range(len(netsD)):
@@ -163,7 +164,7 @@ class condGANTrainer(object):
         fake_imgs, attention_maps, _, _ = netG(noise, sent_emb, words_embs, mask)
         for i in range(len(attention_maps)):
             if len(fake_imgs) > 1:
-                img = fake_imgs[i+1].detach().cpu()
+                img = fake_imgs[i + 1].detach().cpu()
                 lr_img = fake_imgs[i].detach().cpu()
             else:
                 img = fake_imgs[0].detach().cpu()
@@ -173,14 +174,12 @@ class condGANTrainer(object):
             att_size = attn_maps.size(2)
             img_set, _ = \
                 build_super_images(img, captions, self.ixtoword, attn_maps,
-                                  att_size, lr_imgs = lr_img)
+                                   att_size, lr_imgs=lr_img)
             if img_set is not None:
                 im = Image.fromarray(img_set)
-                fullpath = '%s/D_%s_%d.png'\
-                    % (self.image_dir, name, gen_iterations)
+                fullpath = '%s/D_%s_%d.png' \
+                           % (self.image_dir, name, gen_iterations)
                 im.save(fullpath)
-
-
 
     def train(self):
         text_encoder, image_encoder, netG, netsD, start_epoch = self.build_models()
@@ -191,12 +190,12 @@ class condGANTrainer(object):
         batch_size = self.batch_size
         nz = cfg.GAN.Z_DIM
         noise = Variable(torch.FloatTensor(batch_size, nz))
-        fixed_noise = Variable(torch.FloatTensor(batch_size, nz).normal(0,1))
+        fixed_noise = Variable(torch.FloatTensor(batch_size, nz).normal(0, 1))
         if cfg.CUDA:
             noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
 
         gen_iterations = 0
-        #gen_iterations = start_epoch*self.num_batches
+        # gen_iterations = start_epoch*self.num_batches
 
         for epoch in range(start_epoch, self.max_epoch):
             start_t = time.time()
@@ -220,7 +219,7 @@ class condGANTrainer(object):
 
                 ### Generate Fake Images #############
                 ######################################
-                noise.data.normal_(0,1)
+                noise.data.normal_(0, 1)
                 fake_images, _, mu, logvar = netG(noise, sent_emb, words_embs, mask)
 
                 ### Update D network #######
@@ -239,7 +238,7 @@ class condGANTrainer(object):
                 ####### Update G Network: maximize log(D(G(z)))
                 ###############################################
                 step += 1
-                gen_iterations +=1
+                gen_iterations += 1
                 netG.zero_grad()
                 errG_total, G_logs = generator_loss(netsD, image_encoder, fake_images,
                                                     real_labels, words_embs, sent_emb, match_labels,
@@ -254,8 +253,8 @@ class condGANTrainer(object):
 
                 if gen_iterations % 100 == 0:
                     print(D_logs + '\n' + G_logs)
-                #save images
-                if gen_iterations %1000 == 0:
+                # save images
+                if gen_iterations % 1000 == 0:
                     backup_para = copy_G_params(netG)
                     load_params(netG, avg_param_G)
                     self.save_img_results(netG, fixed_noise, sent_emb, words_embs,
@@ -274,10 +273,3 @@ class condGANTrainer(object):
                 self.save_model(netG, avg_param_G, netsD, epoch)
 
         self.save_model(netG, avg_param_G, netsD, self.max_epoch)
-
-
-
-
-
-
-
