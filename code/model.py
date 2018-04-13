@@ -292,3 +292,187 @@ class G_NET(nn.Module):
         if cfg.TREE.BRANCH_NUM > 2:
             self.h_net3 = NEXT_STAGE_G(ngf, nef, ncf)
             self.img_net3 = GET_IMAGE_G(ngf)
+
+    def forward(self, z_code, sent_emb, word_embs, mask):
+        fake_imgs = []
+        att_maps = []
+        c_code, mu, logvar = self.ca_net(sent_emb)
+
+        if cfg.TREE.BRANCH_NUM > 0:
+            h_code1 = self.h_net1(z_code, c_code)
+            fake_img1 = self.img_net1(h_code1)
+            fake_imgs.append(fake_img1)
+        if cfg.TREE.BRANCH_NUM > 1:
+            h_code2, att1 = self.h_net2(h_code1, c_code, word_embs, mask)
+            fake_img2 = self.img_net2(h_code2)
+            fake_imgs.append(fake_img2)
+            if att1 is not None:
+                att_maps.append(att1)
+        if cfg.TREE.BRANCH_NUM > 2:
+            h_code3, att2 = self.h_net3(h_code2, c_code, word_embs, mask)
+            fake_img3 = self.img_net3(h_code3)
+            fake_imgs.append(fake_img3)
+            if att2 is not None:
+                att_maps.append(att2)
+
+        return fake_imgs, att_maps, mu, logvar
+
+
+class G_DCGAN(nn.Module):
+    def __init__(self):
+        super(G_DCGAN, self).__init__()
+        ngf = cfg.GAN.GF_DIM
+        nef = cfg.TEXT.EMBEDDING_DIM
+        ncf = cfg.GAN.CONDITION_DIM
+        self.ca_net = CA_NET()
+
+        if cfg.TREE.BRANCH_NUM > 0:
+            self.h_net1 = INIT_STAGE_G(ngf*16, ncf)
+        if cfg.TREE.BRANCH_NUM > 1:
+            self.h_net2 = NEXT_STAGE_G(ngf, nef, ncf)
+        if cfg.TREE.BRANCH_NUM > 2:
+            self.h_net3 = NEXT_STAGE_G(ngf, nef, ncf)
+        self.img_net = GET_IMAGE_G(ngf)
+
+    def forward(self, z_code, sent_emb, word_embs,mask):
+        att_maps = []
+        c_code, mu, logvar = self.ca_net(sent_emb)
+        if cfg.TREE.BRANCH_NUM > 0:
+            h_code = self.h_net1(z_code, c_code)
+        if cfg.TREE.BRANCH_NUM > 1:
+            h_code, att1 = self.h_net2(h_code, c_code, word_embs, mask)
+            if att1 is not None:
+                att_maps.append(att1)
+        if cfg.TREE.BRANCH_NUM > 2:
+            h_code, att2 = self.h_net3(h_code, c_code, word_embs, mask)
+            if att2 is not None:
+                att_maps.append(att2)
+
+        fake_imgs = self.img_net(h_code)
+        return [fake_imgs], att_maps, mu, logvar
+
+######## Discriminator Networks
+
+#downscale the spatial size by a factor of 16
+def encode_image_by_16times(ndf):
+    encode_image = nn.Sequential(
+        nn.Conv2d(in_channels=3, out_channels=ndf, kernel_size=4, stride=2,
+                  padding=1, bias=False),
+        nn.LeakyReLU(0.2, inplace=True),
+        nn.Conv2d(ndf, ndf*2, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(ndf * 2),
+        nn.LeakyReLU(0.2, inplace=True),
+        nn.Conv2d(ndf * 2, ndf *4, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(ndf * 4),
+        nn.LeakyReLU(0.2, inplace=True),
+        nn.Conv2d(ndf *4, ndf *8, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(ndf * 8),
+        nn.LeakyReLU(0.2, inplace=True)
+    )
+    return encode_image
+
+def Block3x3_leakyRelu(in_planes, out_planes):
+    block = nn.Sequential(
+        conv3x3(in_planes, out_planes),
+        nn.BatchNorm2d(out_planes),
+        nn.LeakyReLU(0.2, inplace=True)
+    )
+    return block
+
+# Downscale the spatial size by 2
+def downBlock(in_planes, out_planes):
+    block = nn.Sequential(
+        nn.Conv2d(in_planes, out_planes, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(out_planes),
+        nn.LeakyReLU(0.2, inplace=True)
+    )
+    return block
+
+class D_GET_LOGITS(nn.Module):
+    def __init__(self, ndf, nef, bcondition=False):
+        super(D_GET_LOGITS, self).__init__()
+        self.df_dim = ndf
+        self.ef_dim = nef
+        self.bcondition = bcondition
+        if self.bcondition:
+            self.joinConv = Block3x3_leakyRelu(ndf*8 + nef, ndf *8)
+
+        self.outlogits = nn.Sequential(
+            nn.Conv2d(ndf * 8, 1, kernel_size=4, stride=4),
+            nn.Sigmoid()
+        )
+
+    def forward(self, h_code, c_code=None):
+        if self.bcondition and c_code is not None:
+            c_code = c_code.view(-1, self.ef_dim, 1, 1)
+            c_code = c_code.repeat(1,1,4,4)
+            h_c_code = torch.cat((h_code, c_code), 1)
+            h_c_code = self.joinConv(h_c_code)
+        else:
+            h_c_code = h_code
+
+        output = self.outlogits(h_c_code)
+        return output.view(-1)
+
+# for 64 x 64 images
+class D_NET64(nn.Module):
+    def __init__(self, b_jcu = True):
+        super(D_NET64, self).__init__()
+        ndf = cfg.GAN.DF_DIM
+        nef = cfg.TEXT.EMBEDDING_DIM
+        self.img_code_s16 = encode_image_by_16times(ndf)
+        if b_jcu:
+            self.UNCOND_DNET = D_GET_LOGITS(ndf, nef, bcondition=False)
+        else:
+            self.UNCOND_DNET = None
+        self.COND_DNET = D_GET_LOGITS(ndf, nef, bcondition=True)
+
+    def forward(self, x_var):
+        x_code4 = self.img_code_s16(x_var)      # 4 x 4 x 8df
+        return x_code4
+
+# for 128 x 128 images
+class D_NET128(nn.Module):
+    def __init__(self, b_jcu=True):
+        super(D_NET128, self).__init__()
+        ndf = cfg.GAN.DF_DIM
+        nef = cfg.TEXT.EMBEDDING_DIM
+        self.img_code_s16 = encode_image_by_16times(ndf)
+        self.img_code_s32 = downBlock(ndf*8, ndf*16)
+        self.img_code_s32_1 = Block3x3_leakyRelu(ndf*16, ndf*8)
+        if b_jcu:
+            self.UNCOND_DNET = D_GET_LOGITS(ndf, nef, bcondition=False)
+        else:
+            self.UNCOND_DNET = None
+        self.COND_DNET = D_GET_LOGITS(ndf, nef, bcondition=True)
+
+    def forward(self, x_var):
+        x_code8 = self.img_code_s16(x_var)      # 8 x 8 x 8df
+        x_code4 = self.img_code_s32(x_code8)  # 4 x 4 x 16df
+        x_code4 = self.img_code_s32_1(x_code4)      # 4 x 4 x 8df
+        return x_code4
+
+# for 256 x 256 images
+class D_NET256(nn.Module):
+    def __init__(self, b_jcu=True):
+        super(D_NET256, self).__init__()
+        ndf = cfg.GAN.DF_DIM
+        nef = cfg.TEXT.EMBEDDING_DIM
+        self.img_code_s16 = encode_image_by_16times(ndf)
+        self.img_code_s32 = downBlock(ndf*8, ndf*16)
+        self.img_code_64 = downBlock(ndf*16, ndf*32)
+        self.img_code_64_1 = Block3x3_leakyRelu(ndf*32, ndf*16)
+        self.img_code_s64_2 = Block3x3_leakyRelu(ndf*16, ndf*8)
+        if b_jcu:
+            self.UNCOND_DNET = D_GET_LOGITS(ndf, nef, bcondition=False)
+        else:
+            self.UNCOND_DNET = None
+        self.COND_DNET = D_GET_LOGITS(ndf, nef, bcondition=True)
+
+    def forward(self, x_var):
+        x_code16 = self.img_code_s16(x_var)
+        x_code8 = self.img_code_s32(x_code16)
+        x_code4 = self.img_code_s64(x_code8)
+        x_code4 = self.img_code_64_1(x_code4)
+        x_code4 = self.img_code_s64_2(x_code4)
+        return x_code4
