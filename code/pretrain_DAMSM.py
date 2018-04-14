@@ -15,6 +15,7 @@ from miscc.utils import mkdir_p
 from model import RNN_ENCODER, CNN_ENCODER
 from torch.autograd import Variable
 import argparse
+from datasets import prepare_data
 
 
 def parse_args():
@@ -35,7 +36,7 @@ def build_models():
     labels = Variable(torch.LongTensor(range(batch_size)))
     start_epoch = 0
 
-    """WHat is it??"""
+    """Pretrain_DAMSM ke weights"""
     if cfg.TRAIN.NET_E != '':
         state_dict = torch.load(cfg.TRAIN.NET_E)
         text_encoder.load_state_dict(state_dict)
@@ -72,11 +73,32 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
     start_time = time.time()
     for step, data in enumerate(dataloader, 0):
         # print('step', step)
+        """
+        Sets gradients of all model parameters to zero.
+        Every time a variable is back propogated through, the gradient will be accumulated instead of being replaced.
+        (This makes it easier for rnn, because each module will be back propogated through several times.)
+        """
         rnn_model.zero_grad()
         cnn_model.zero_grad()
 
         imgs, captions, cap_lens, \
             class_ids, keys = prepare_data(data)
+
+        # words_features: batch_size x nef x 17 x 17
+        # sent_code: batch_size x nef
+        words_features, sent_code = cnn_model(imgs[-1])
+        # --> batch_size x nef x 17*17
+        nef, att_sze = words_features.size(1), words_features.size(2)
+        # words_features = words_features.view(batch_size, nef, -1)
+
+        """Dont understand completely ??"""
+        hidden = rnn_model.init_hidden(batch_size)
+        # words_emb: batch_size x nef x seq_len
+        # sent_emb: batch_size x nef
+        words_emb, sent_emb = rnn_model(captions, cap_lens, hidden)
+
+        w_loss0, w_loss1, attn_maps = words_loss(words_features, words_emb, labels,
+                                                 cap_lens, class_ids, batch_size)
 
 if __name__ == "__main__":
     args = parse_args()
@@ -159,5 +181,10 @@ if __name__ == "__main__":
         for epoch in range(start_epoch, cfg.TRAIN.MAX_EPOCH):
             optimizer = optim.Adam(para, lr=lr, betas=(0.5, 0.999))
             epoch_start_time = time.time()
-            count = train(dataloader)
-    except:
+            count = train(dataloader, image_encoder, text_encoder,
+                          batch_size, labels, optimizer, epoch,
+                          dataset.ixtoword, image_dir)
+    except Exception as e:
+        print(e)
+        print("ERROR")
+        pass

@@ -12,9 +12,40 @@ from nltk import RegexpTokenizer, defaultdict
 
 from miscc.config import cfg
 
-"""
-prepare data not written
-"""
+import torch
+import torch.utils.data as data
+from torch.autograd import Variable
+import torchvision.transforms as transforms
+
+
+def prepare_data(data):
+    imgs, captions, captions_lens, class_ids, keys = data
+
+    # sort data by the length in a decreasing order
+    sorted_cap_lens, sorted_cap_indices = torch.sort(captions_lens, 0, True)
+
+    real_imgs = []
+    """The loop only run once"""
+    for i in range(len(imgs)):
+        imgs[i] = imgs[i][sorted_cap_indices]
+        if cfg.CUDA:
+            real_imgs.append(Variable(imgs[i]).cuda())
+        else:
+            real_imgs.append(Variable(imgs[i]))
+
+    captions = captions[sorted_cap_indices].squeeze()
+    class_ids = class_ids[sorted_cap_indices].numpy()
+
+    keys = [keys[i] for i in sorted_cap_indices.numpy()]
+
+    if cfg.CUDA:
+        captions = Variable(captions).cuda()
+        sorted_cap_lens = Variable(sorted_cap_lens).cuda()
+    else:
+        captions = Variable(captions)
+        sorted_cap_lens = Variable(sorted_cap_lens)
+
+    return [real_imgs, captions, sorted_cap_lens, class_ids, keys]
 
 def get_imgs(img_name, imsize, bbox=None, transform=None, normalize=None):
     img = Image.open(img_name).convert('RGB')
