@@ -14,6 +14,28 @@ from GlobalAttention import GlobalAttentionGeneral as ATT_NET
 # ############## Text2Image Encoder-Decoder #######
 class RNN_ENCODER(nn.Module):
     """How is it working ??"""
+    def __init__(self, ntoken, ninput=300, drop_prob=0.5,
+                 nhidden=128, nlayers=1, bidirectional=True):
+        super(RNN_ENCODER, self).__init__()
+
+        """What is the use and meaning of n_steps"""
+        self.n_steps = cfg.TEXT.WORDS_NUM
+        self.ntoken = ntoken  # size of the dictionary
+        self.ninput = ninput  # size of each embedding vector
+        self.drop_prob = drop_prob  # probability of an element to be zeroed
+        self.nlayers = nlayers  # Number of recurrent layers
+        self.bidirectional = bidirectional
+        self.rnn_type = cfg.RNN_TYPE
+        if bidirectional:
+            self.num_directions = 2
+        else:
+            self.num_directions = 1
+
+        # number of features in the hidden state
+        self.nhidden = nhidden // self.num_directions
+
+        self.define_module()
+        self.init_weights()
 
     def forward(self, captions, cap_lens, hidden, mask=None):
         # input: torch.LongTensor of size batch x n_steps
@@ -42,29 +64,6 @@ class RNN_ENCODER(nn.Module):
             sent_emb = hidden.transpose(0, 1).contiguous()
         sent_emb = sent_emb.view(-1, self.nhidden * self.num_directions)
         return words_emb, sent_emb
-
-    def __init__(self, ntoken, ninput=300, drop_prob=0.5,
-                 nhidden=128, nlayers=1, bidirectional=True):
-        super(RNN_ENCODER, self).__init__()
-
-        """What is the use and meaning of n_steps"""
-        self.n_steps = cfg.TEXT.WORDS_NUM
-        self.ntoken = ntoken  # size of the dictionary
-        self.ninput = ninput  # size of each embedding vector
-        self.drop_prob = drop_prob  # probability of an element to be zeroed
-        self.nlayers = nlayers  # Number of recurrent layers
-        self.bidirectional = bidirectional
-        self.rnn_type = cfg.RNN_TYPE
-        if bidirectional:
-            self.num_directions = 2
-        else:
-            self.num_directions = 1
-
-        # number of features in the hidden state
-        self.nhidden = nhidden // self.num_directions
-
-        self.define_module()
-        self.init_weights()
 
     def define_module(self):
         self.encoder = nn.Embedding(self.ntoken, self.ninput)
