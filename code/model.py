@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.parallel
 from miscc.config import cfg
 from torchvision import models
 import torch.utils.model_zoo as model_zoo
@@ -8,12 +9,36 @@ from torch.autograd import Variable
 
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-
 from GlobalAttention import GlobalAttentionGeneral as ATT_NET
+
+
+def conv1x1(in_planes, out_planes, bias=False):
+    "1x1 convolution with padding"
+    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1,
+                     padding=0, bias=bias)
+
+
+def conv3x3(in_planes, out_planes):
+    "3x3 convolution with padding"
+    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=1,
+                     padding=1, bias=False)
+
+
+# upscale spatial size by 2
+def upBlock(in_planes, out_planes):
+    block = nn.Sequential(
+        nn.Upsample(scale_factor=2, mode='nearest'),
+        conv3x3(in_planes, out_planes * 2),
+        nn.BatchNorm2d(out_planes * 2),
+        GLU()
+    )
+    return block
+
 
 # ############## Text2Image Encoder-Decoder #######
 class RNN_ENCODER(nn.Module):
     """How is it working ??"""
+
     def __init__(self, ntoken, ninput=300, drop_prob=0.5,
                  nhidden=128, nlayers=1, bidirectional=True):
         super(RNN_ENCODER, self).__init__()
@@ -102,12 +127,6 @@ class RNN_ENCODER(nn.Module):
         else:
             return (Variable(weight.new(self.nlayers * self.num_directions,
                                         bsz, self.nhidden).zero_()))
-
-
-def conv1x1(in_planes, out_planes, bias=False):
-    "1x1 convolution with padding"
-    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1,
-                     padding=0, bias=bias)
 
 
 class CNN_ENCODER(nn.Module):
@@ -232,23 +251,6 @@ class GLU(nn.Module):  ######## purpose ???
         assert nc % 2 == 0, 'channels not divisible by 2.'
         nc = int(nc / 2)
         return x[:, :nc] * F.sigmoid(x[:, nc:])
-
-
-def conv3x3(in_planes, out_planes):
-    "3x3 convolution with padding"
-    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=1,
-                     padding=1, bias=False)
-
-
-# upscale spatial size by 2
-def upBlock(in_planes, out_planes):
-    block = nn.Sequential(
-        nn.Upsample(scale_factor=2, mode='nearest'),
-        conv3x3(in_planes, out_planes * 2),
-        nn.BatchNorm2d(out_planes * 2),
-        GLU()
-    )
-    return block
 
 
 class ResBlock(nn.Module):

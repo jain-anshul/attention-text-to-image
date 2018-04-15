@@ -1,3 +1,4 @@
+import Image
 import pprint
 import random
 import numpy as np
@@ -16,6 +17,10 @@ from model import RNN_ENCODER, CNN_ENCODER
 from torch.autograd import Variable
 import argparse
 from datasets import prepare_data
+from miscc.losses import words_loss, sent_loss
+from miscc.utils import build_super_images
+
+UPDATE_INTERVAL = 200
 
 
 def parse_args():
@@ -82,7 +87,7 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
         cnn_model.zero_grad()
 
         imgs, captions, cap_lens, \
-            class_ids, keys = prepare_data(data)
+        class_ids, keys = prepare_data(data)
 
         # words_features: batch_size x nef x 17 x 17
         # sent_code: batch_size x nef
@@ -99,6 +104,55 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
 
         w_loss0, w_loss1, attn_maps = words_loss(words_features, words_emb, labels,
                                                  cap_lens, class_ids, batch_size)
+        w_total_loss0 += w_loss0.data
+        w_total_loss1 += w_loss1.data
+        loss = w_loss0 + w_loss1
+
+        s_loss0, s_loss1 = sent_loss(sent_code, sent_emb, labels, class_ids, batch_size)
+        loss += s_loss0 + s_loss1
+        s_total_loss0 += s_loss0.data
+        s_total_loss1 += s_loss1.data
+
+        loss.backward()
+        #
+        # `clip_grad_norm` helps prevent
+        # the exploding gradient problem in RNNs / LSTMs.
+        torch.nn.utils.clip_grad_norm(rnn_model.parameters(),
+                                      cfg.TRAIN.RNN_GRAD_CLIP)
+        optimizer.step()
+
+        if step % UPDATE_INTERVAL == 0:
+            count = epoch * len(dataloader) + step
+
+            s_cur_loss0 = s_total_loss0[0] / UPDATE_INTERVAL
+            s_cur_loss1 = s_total_loss1[0] / UPDATE_INTERVAL
+
+            w_cur_loss0 = w_total_loss0[0] / UPDATE_INTERVAL
+            w_cur_loss1 = w_total_loss1[0] / UPDATE_INTERVAL
+
+            elapsed = time.time() - start_time
+            print('| epoch {:3d} | {:5d}/{:5d} batches | ms/batch {:5.2f} | '
+                  's_loss {:5.2f} {:5.2f} | '
+                  'w_loss {:5.2f} {:5.2f}'
+                  .format(epoch, step, len(dataloader),
+                          elapsed * 1000. / UPDATE_INTERVAL,
+                          s_cur_loss0, s_cur_loss1,
+                          w_cur_loss0, w_cur_loss1))
+
+            s_total_loss0 = 0
+            s_total_loss1 = 0
+            w_total_loss0 = 0
+            w_total_loss1 = 0
+            start_time = time.time()
+            # attention Maps
+            img_set, _ = build_super_images(imgs[-1].cpu(), captions, ixtoword, attn_maps, att_sze)
+
+            if img_set is not None:
+                im = Image.fromarray(img_set)
+                fullpath = '%s/attention_maps%d.png' % (image_dir, step)
+                im.save(fullpath)
+    return count
+
 
 if __name__ == "__main__":
     args = parse_args()

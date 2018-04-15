@@ -6,9 +6,12 @@ import random
 import numpy as np
 import datetime
 import dateutil.tz
+import time
 
 import torch
 import torchvision.transforms as transforms
+
+from trainer import condGANTrainer as trainer
 
 
 def parse_args():
@@ -81,4 +84,24 @@ if __name__ == "__main__":
     dataset = TextDataset(cfg.DATA_DIR, split_dir,
                           base_size=cfg.TREE.BASE_SIZE,
                           transform=image_transform)
-    print ('check')
+
+    assert dataset
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=cfg.TRAIN.BATCH_SIZE,
+        drop_last=True, shuffle=bshuffle, num_workers=int(cfg.WORKERS)
+    )
+
+    # Define models and go to train/evaluate
+    algo = trainer(output_dir, dataloader, dataset.n_words, dataset.ixtoword)
+
+    start_t = time.time()
+    if cfg.TRAIN.FLAG:
+        algo.train()
+    # else:
+    #     '''generate images from pre-extracted embeddings'''
+    #     if cfg.B_VALIDATION:
+    #         algo.sampling(split_dir)  # generate images for the whole valid dataset
+    #     else:
+    #         gen_example(dataset.wordtoix, algo)
+    end_t = time.time()
+    print('Total time for training:', end_t - start_t)
