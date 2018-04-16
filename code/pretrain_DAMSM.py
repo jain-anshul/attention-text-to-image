@@ -1,4 +1,4 @@
-import Image
+from PIL import Image
 import pprint
 import random
 import numpy as np

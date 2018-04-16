@@ -33,7 +33,7 @@ def words_loss(img_features, words_emb, labels,
         # Get the i-th text description
         words_num = cap_lens[i]
         # --> 1 x nef x words_num
-        word = words_emb[i, ::words_num].unsqueeze(0).contiguous()
+        word = words_emb[i, :, :words_num].unsqueeze(0).contiguous()
         # batch x nef x words_num
         word = word.repeat(batch_size, 1, 1)
         # batch x nef x 17*17
