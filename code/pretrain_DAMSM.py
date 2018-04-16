@@ -238,6 +238,26 @@ if __name__ == "__main__":
             count = train(dataloader, image_encoder, text_encoder,
                           batch_size, labels, optimizer, epoch,
                           dataset.ixtoword, image_dir)
+
+            print('-' * 89)
+            if len(dataloader_val) > 0:
+                s_loss, w_loss = evaluate(dataloader_val, image_encoder,
+                                          text_encoder, batch_size)
+                print('| end epoch {:3d} | valid loss '
+                      '{:5.2f} {:5.2f} | lr {:.5f}|'
+                      .format(epoch, s_loss, w_loss, lr))
+            print('-' * 89)
+            if lr > cfg.TRAIN.ENCODER_LR / 10.:
+                lr *= 0.98
+
+            if (epoch % cfg.TRAIN.SNAPSHOT_INTERVAL == 0 or
+                        epoch == cfg.TRAIN.MAX_EPOCH):
+                torch.save(image_encoder.state_dict(),
+                           '%s/image_encoder%d.pth' % (model_dir, epoch))
+                torch.save(text_encoder.state_dict(),
+                           '%s/text_encoder%d.pth' % (model_dir, epoch))
+                print('Save G/Ds models.')
+                
     except Exception as e:
         print(e)
         print("ERROR")
