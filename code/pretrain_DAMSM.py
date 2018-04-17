@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 from PIL import Image
 import pprint
 import random

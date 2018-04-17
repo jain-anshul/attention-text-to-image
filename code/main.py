@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 from miscc.config import cfg_from_file, cfg
 from datasets import TextDataset
 import argparse
