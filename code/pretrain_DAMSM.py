@@ -20,7 +20,7 @@ from datasets import prepare_data
 from miscc.losses import words_loss, sent_loss
 from miscc.utils import build_super_images
 
-UPDATE_INTERVAL = 200
+UPDATE_INTERVAL = 100
 
 
 def parse_args():
@@ -182,7 +182,7 @@ def train(dataloader, cnn_model, rnn_model, batch_size,
 
             if img_set is not None:
                 im = Image.fromarray(img_set)
-                fullpath = '%s/attention_maps%d.png' % (image_dir, step)
+                fullpath = '%s/attention_maps_%d_epoch_%d_step.png' % (image_dir, epoch, step)
                 im.save(fullpath)
     return count
 
@@ -263,35 +263,35 @@ if __name__ == "__main__":
             para.append(v)
     # optimizer = optim.Adam(para, lr=cfg.TRAIN.ENCODER_LR, betas=(0.5, 0.999))
     # At any point you can hit Ctrl + C to break out of training early.
-    try:
-        lr = cfg.TRAIN.ENCODER_LR
-        for epoch in range(start_epoch, cfg.TRAIN.MAX_EPOCH):
-            optimizer = optim.Adam(para, lr=lr, betas=(0.5, 0.999))
-            epoch_start_time = time.time()
-            count = train(dataloader, image_encoder, text_encoder,
-                          batch_size, labels, optimizer, epoch,
-                          dataset.ixtoword, image_dir)
+    # try:
+    lr = cfg.TRAIN.ENCODER_LR
+    for epoch in range(start_epoch, cfg.TRAIN.MAX_EPOCH):
+        optimizer = optim.Adam(para, lr=lr, betas=(0.5, 0.999))
+        epoch_start_time = time.time()
+        count = train(dataloader, image_encoder, text_encoder,
+                      batch_size, labels, optimizer, epoch,
+                      dataset.ixtoword, image_dir)
 
-            print('-' * 89)
-            if len(dataloader_val) > 0:
-                s_loss, w_loss = evaluate(dataloader_val, image_encoder,
-                                          text_encoder, batch_size)
-                print('| end epoch {:3d} | valid loss '
-                      '{:5.2f} {:5.2f} | lr {:.5f}|'
-                      .format(epoch, s_loss, w_loss, lr))
-            print('-' * 89)
-            if lr > cfg.TRAIN.ENCODER_LR / 10.:
-                lr *= 0.98
+        print('-' * 89)
+        if len(dataloader_val) > 0:
+            s_loss, w_loss = evaluate(dataloader_val, image_encoder,
+                                      text_encoder, batch_size)
+            print('| end epoch {:3d} | valid loss '
+                  '{:5.2f} {:5.2f} | lr {:.5f}|'
+                  .format(epoch, s_loss, w_loss, lr))
+        print('-' * 89)
+        if lr > cfg.TRAIN.ENCODER_LR / 10.:
+            lr *= 0.98
 
-            if (epoch % cfg.TRAIN.SNAPSHOT_INTERVAL == 0 or
-                        epoch == cfg.TRAIN.MAX_EPOCH):
-                torch.save(image_encoder.state_dict(),
-                           '%s/image_encoder%d.pth' % (model_dir, epoch))
-                torch.save(text_encoder.state_dict(),
-                           '%s/text_encoder%d.pth' % (model_dir, epoch))
-                print('Save G/Ds models.')
+        if (epoch % cfg.TRAIN.SNAPSHOT_INTERVAL == 0 or
+                    epoch == cfg.TRAIN.MAX_EPOCH):
+            torch.save(image_encoder.state_dict(),
+                       '%s/image_encoder%d.pth' % (model_dir, epoch))
+            torch.save(text_encoder.state_dict(),
+                       '%s/text_encoder%d.pth' % (model_dir, epoch))
+            print('Save G/Ds models.')
 
-    except Exception as e:
-        print(e)
-        print("ERROR")
-        pass
+    # except Exception as e:
+    #     print(e)
+    #     print("ERROR")
+    #     pass

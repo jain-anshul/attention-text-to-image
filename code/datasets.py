@@ -54,9 +54,9 @@ def get_imgs(img_name, imsize, bbox=None, transform=None, normalize=None):
     if bbox is not None:
         """
         bbox[0] is x coordinate of 1st point
-        bbox[2] is y coordinate of 1st point
-        bbox[0] is width of rect box
-        bbox[0] is height of rect box
+        bbox[1] is y coordinate of 1st point
+        bbox[2] is width of rect box
+        bbox[3] is height of rect box
         """
 
         """Why 0.75??"""
@@ -64,9 +64,9 @@ def get_imgs(img_name, imsize, bbox=None, transform=None, normalize=None):
         center_x = int((2 * bbox[0] + bbox[2]) / 2)
         center_y = int((2 * bbox[1] + bbox[3]) / 2)
         y1 = np.maximum(0, center_y - r)
-        y2 = np.maximum(height, center_y + r)
+        y2 = np.minimum(height, center_y + r)
         x1 = np.maximum(0, center_x - r)
-        x2 = np.maximum(width, center_x + r)
+        x2 = np.minimum(width, center_x + r)
         img = img.crop([x1, y1, x2, y2])
 
     if transform is not None:
@@ -81,7 +81,7 @@ def get_imgs(img_name, imsize, bbox=None, transform=None, normalize=None):
                 re_img = transforms.Scale(imsize[i])(img)
             else:
                 re_img = img
-            ret.append((normalize(re_img)))
+            ret.append(normalize(re_img))
     return ret
 
 
@@ -135,7 +135,7 @@ class TextDataset(data.Dataset):
         """A dictionary with key as filename"""
         filename_bbox = {img_file[:-4]: [] for img_file in filenames}
         numImgs = len(filenames)
-        for i in range(0, numImgs):
+        for i in xrange(0, numImgs):
             bbox = df_bounding_boxes.iloc[i][1:].tolist()
 
             key = filenames[i][:-4]
@@ -170,7 +170,7 @@ class TextDataset(data.Dataset):
                         if len(t) > 0:
                             tokens_new.append(t)
 
-                    all_captions.append(t)
+                    all_captions.append(tokens_new)
                     cnt += 1
                     if cnt == self.embeddings_num:
                         break
@@ -278,7 +278,13 @@ class TextDataset(data.Dataset):
 
     def get_caption(self, sent_ix):
         # a list of indices for a sentence
-        sent_caption = np.asarray(self.captions[sent_ix]).astype('int64')
+        try:
+            sent_caption = np.asarray(self.captions[sent_ix]).astype('int64')
+        except Exception as e:
+            print(e)
+            print('sent_ix')
+            exit()
+
         if (sent_caption == 0).sum() > 0:
             print("ERROR: do not need END(0) token", sent_caption)
         num_words = len(sent_caption)
