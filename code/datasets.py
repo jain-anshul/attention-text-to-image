@@ -1,6 +1,6 @@
 """Future terms"""
 import os
-import random
+import numpy.random as random
 
 import pandas as pd
 import numpy as np
@@ -282,7 +282,8 @@ class TextDataset(data.Dataset):
             sent_caption = np.asarray(self.captions[sent_ix]).astype('int64')
         except Exception as e:
             print(e)
-            print('sent_ix')
+            print(len(self.captions))
+            print(sent_ix)
             exit()
 
         if (sent_caption == 0).sum() > 0:
