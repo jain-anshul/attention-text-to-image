@@ -12,6 +12,17 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from GlobalAttention import GlobalAttentionGeneral as ATT_NET
 
 
+class GLU(nn.Module):  ######## purpose ???
+    def __init__(self):
+        super(GLU, self).__init__()
+
+    def forward(self, x):
+        nc = x.size(1)
+        assert nc % 2 == 0, 'channels not divisible by 2.'
+        nc = int(nc / 2)
+        return x[:, :nc] * F.sigmoid(x[:, nc:])
+
+
 def conv1x1(in_planes, out_planes, bias=False):
     "1x1 convolution with padding"
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1,
@@ -33,6 +44,24 @@ def upBlock(in_planes, out_planes):
         GLU()
     )
     return block
+
+
+class ResBlock(nn.Module):
+    def __init__(self, channel_num):
+        super(ResBlock, self).__init__()
+        self.block = nn.Sequential(
+            conv3x3(channel_num, channel_num * 2),
+            nn.BatchNorm2d(channel_num * 2),
+            GLU(),
+            conv3x3(channel_num, channel_num),
+            nn.BatchNorm2d(channel_num)
+        )
+
+    def forward(self, x):
+        residual = x
+        out = self.block(x)
+        out += residual
+        return out
 
 
 # ############## Text2Image Encoder-Decoder #######
@@ -61,34 +90,6 @@ class RNN_ENCODER(nn.Module):
 
         self.define_module()
         self.init_weights()
-
-    def forward(self, captions, cap_lens, hidden, mask=None):
-        # input: torch.LongTensor of size batch x n_steps
-        # --> embL batch x n_steps x ninput
-        emb = self.drop(self.encoder(captions))
-        #
-        # Returns: a PackedSequence object
-        cap_lens = cap_lens.data.tolist()
-        emb = pack_padded_sequence(emb, cap_lens, batch_first=True)
-        # #hidden and memory (num_layers * num_directions, batch, hidden_size):
-        # tensor containing the initial hidden state for each element in batch.
-        # #output (batch, seq_len, hidden_size * num_directions)
-        # #or a PackedSequence object:
-        # tensor containing output features (h_t) from the last layer of RNN
-        output, hidden = self.rnn(emb, hidden)
-        # PackedSequence object
-        # --> (batch, seq_len, hidden_size * num_directions)
-        output = pad_packed_sequence(output, batch_first=True)[0]
-        # output = self.drop(output)
-        # --> batch x hidden_size*num_directions x seq_len
-        words_emb = output.transpose(1, 2)
-        # --> batch x num_directions*hidden_size
-        if self.rnn_type == 'LSTM':
-            sent_emb = hidden[0].transpose(0, 1).contiguous()
-        else:
-            sent_emb = hidden.transpose(0, 1).contiguous()
-        sent_emb = sent_emb.view(-1, self.nhidden * self.num_directions)
-        return words_emb, sent_emb
 
     def define_module(self):
         self.encoder = nn.Embedding(self.ntoken, self.ninput)
@@ -125,11 +126,87 @@ class RNN_ENCODER(nn.Module):
                     Variable(weight.new(self.nlayers * self.num_directions,
                                         bsz, self.nhidden).zero_()))
         else:
-            return (Variable(weight.new(self.nlayers * self.num_directions,
-                                        bsz, self.nhidden).zero_()))
+            return Variable(weight.new(self.nlayers * self.num_directions,
+                                       bsz, self.nhidden).zero_())
+
+    def forward(self, captions, cap_lens, hidden, mask=None):
+        # input: torch.LongTensor of size batch x n_steps
+        # --> embL batch x n_steps x ninput
+        emb = self.drop(self.encoder(captions))
+        #
+        # Returns: a PackedSequence object
+        cap_lens = cap_lens.data.tolist()
+        emb = pack_padded_sequence(emb, cap_lens, batch_first=True)
+        # #hidden and memory (num_layers * num_directions, batch, hidden_size):
+        # tensor containing the initial hidden state for each element in batch.
+        # #output (batch, seq_len, hidden_size * num_directions)
+        # #or a PackedSequence object:
+        # tensor containing output features (h_t) from the last layer of RNN
+        output, hidden = self.rnn(emb, hidden)
+        # PackedSequence object
+        # --> (batch, seq_len, hidden_size * num_directions)
+        output = pad_packed_sequence(output, batch_first=True)[0]
+        # output = self.drop(output)
+        # --> batch x hidden_size*num_directions x seq_len
+        words_emb = output.transpose(1, 2)
+        # --> batch x num_directions*hidden_size
+        if self.rnn_type == 'LSTM':
+            sent_emb = hidden[0].transpose(0, 1).contiguous()
+        else:
+            sent_emb = hidden.transpose(0, 1).contiguous()
+        sent_emb = sent_emb.view(-1, self.nhidden * self.num_directions)
+        return words_emb, sent_emb
 
 
 class CNN_ENCODER(nn.Module):
+    def __init__(self, nef):
+        super(CNN_ENCODER, self).__init__()
+        if cfg.TRAIN.FLAG:
+            self.nef = nef
+        else:
+            self.nef = 256  # define a uniform ranker
+
+        """Inception net??"""
+        model = models.inception_v3()
+
+        url = 'https://download.pytorch.org/models/inception_v3_google-1a9a5a14.pth'
+        model.load_state_dict(model_zoo.load_url(url))
+
+        """No gradient calculation. Maybe no updation"""
+        for param in model.parameters():
+            param.require_grad = False
+        print("Load pretrained model from ", url)
+        self.define_module(model)
+        self.init_trainable_weights()
+
+    def define_module(self, model):
+        self.Conv2d_1a_3x3 = model.Conv2d_1a_3x3
+        self.Conv2d_2a_3x3 = model.Conv2d_2a_3x3
+        self.Conv2d_2b_3x3 = model.Conv2d_2b_3x3
+        self.Conv2d_3b_1x1 = model.Conv2d_3b_1x1
+        self.Conv2d_4a_3x3 = model.Conv2d_4a_3x3
+        self.Mixed_5b = model.Mixed_5b
+        self.Mixed_5c = model.Mixed_5c
+        self.Mixed_5d = model.Mixed_5d
+        self.Mixed_6a = model.Mixed_6a
+        self.Mixed_6b = model.Mixed_6b
+        self.Mixed_6c = model.Mixed_6c
+        self.Mixed_6d = model.Mixed_6d
+        self.Mixed_6e = model.Mixed_6e
+        self.Mixed_7a = model.Mixed_7a
+        self.Mixed_7b = model.Mixed_7b
+        self.Mixed_7c = model.Mixed_7c
+
+        """nef = Embedding dimention,
+        768 is tha number of feature maps"""
+        self.emb_features = conv1x1(768, self.nef)
+        self.emb_cnn_code = nn.Linear(2048, self.nef)
+
+    def init_trainable_weights(self):
+        initrange = 0.1
+        self.emb_features.weight.data.uniform_(-initrange, initrange)
+        self.emb_cnn_code.weight.data.uniform_(-initrange, initrange)
+
     def forward(self, x):
         features = None
 
@@ -192,83 +269,6 @@ class CNN_ENCODER(nn.Module):
         if features is not None:
             features = self.emb_features(features)
         return features, cnn_code
-
-    def __init__(self, nef):
-        super(CNN_ENCODER, self).__init__()
-        if cfg.TRAIN.FLAG:
-            self.nef = nef
-        else:
-            self.nef = 256  # define a uniform ranker
-
-        """Inception net??"""
-        model = models.inception_v3()
-
-        url = 'https://download.pytorch.org/models/inception_v3_google-1a9a5a14.pth'
-        model.load_state_dict(model_zoo.load_url(url))
-
-        """No gradient calculation. Maybe no updation"""
-        for param in model.parameters():
-            param.require_grad = False
-        print("Load pretrained model from ", url)
-        self.define_module(model)
-        self.init_trainable_weights()
-
-    def define_module(self, model):
-        self.Conv2d_1a_3x3 = model.Conv2d_1a_3x3
-        self.Conv2d_2a_3x3 = model.Conv2d_2a_3x3
-        self.Conv2d_2b_3x3 = model.Conv2d_2b_3x3
-        self.Conv2d_3b_1x1 = model.Conv2d_3b_1x1
-        self.Conv2d_4a_3x3 = model.Conv2d_4a_3x3
-        self.Mixed_5b = model.Mixed_5b
-        self.Mixed_5c = model.Mixed_5c
-        self.Mixed_5d = model.Mixed_5d
-        self.Mixed_6a = model.Mixed_6a
-        self.Mixed_6b = model.Mixed_6b
-        self.Mixed_6c = model.Mixed_6c
-        self.Mixed_6d = model.Mixed_6d
-        self.Mixed_6e = model.Mixed_6e
-        self.Mixed_7a = model.Mixed_7a
-        self.Mixed_7b = model.Mixed_7b
-        self.Mixed_7c = model.Mixed_7c
-
-        """nef = Embedding dimention,
-        768 is tha number of feature maps"""
-        self.emb_features = conv1x1(768, self.nef)
-        self.emb_cnn_code = nn.Linear(2048, self.nef)
-
-    def init_trainable_weights(self):
-        initrange = 0.1
-        self.emb_features.weight.data.uniform_(-initrange, initrange)
-        self.emb_cnn_code.weight.data.uniform_(-initrange, initrange)
-
-
-class GLU(nn.Module):  ######## purpose ???
-    def __init__(self):
-        super(GLU, self).__init__()
-
-    def forward(self, x):
-        nc = x.size(1)
-        assert nc % 2 == 0, 'channels not divisible by 2.'
-        nc = int(nc / 2)
-        return x[:, :nc] * F.sigmoid(x[:, nc:])
-
-
-class ResBlock(nn.Module):
-    def __init__(self, channel_num):
-        super(ResBlock, self).__init__()
-        self.block = nn.Sequential(
-            conv3x3(channel_num, channel_num * 2),
-            nn.BatchNorm2d(channel_num * 2),
-            GLU(),
-            conv3x3(channel_num, channel_num),
-            nn.BatchNorm2d(channel_num)
-        )
-
-    def forward(self, x):
-        residual = x
-        out = self.block(x)
-        out += residual
-        return out
 
 
 ###### Generator Code ####################
@@ -344,6 +344,39 @@ class INIT_STAGE_G(nn.Module):
         return out_code64
 
 
+class NEXT_STAGE_G(nn.Module):
+    def __init__(self, ngf, nef, ncf):
+        super(NEXT_STAGE_G, self).__init__()
+        self.gf_dim = ngf
+        self.ef_dim = nef
+        self.cf_dim = ncf
+        self.num_residual = cfg.GAN.R_NUM  ### ????? what is R_NUM
+        self.define_module()
+
+    def _make_layer(self, block, channel_num):
+        layers = []
+        for i in range(cfg.GAN.R_NUM):
+            layers.append(block(channel_num))
+
+        return nn.Sequential(*layers)
+
+    def define_module(self):
+        ngf = self.gf_dim
+        self.att = ATT_NET(ngf, self.ef_dim)
+        self.residual = self._make_layer(ResBlock, ngf * 2)
+        self.upsample = upBlock(ngf * 2, ngf)
+
+    def forward(self, h_code, c_code, word_embs, mask):
+        self.att.applyMask(mask)
+        c_code, att = self.att(h_code, word_embs)
+        h_c_code = torch.cat((h_code, c_code), 1)
+        out_code = self.residual(h_c_code)
+
+        # state size ngf/2 * 2in_size * 2in_size
+        out_code = self.upsample(out_code)
+        return out_code, att
+
+
 class GET_IMAGE_G(nn.Module):
     def __init__(self, ngf):
         super(GET_IMAGE_G, self).__init__()
@@ -356,39 +389,6 @@ class GET_IMAGE_G(nn.Module):
     def forward(self, h_code):
         out_img = self.img(h_code)
         return out_img
-
-
-class NEXT_STAGE_G(nn.Module):
-    def __init__(self, ngf, nef, ncf):
-        super(NEXT_STAGE_G, self).__init__()
-        self.gf_dim = ngf
-        self.ef_dim = nef
-        self.cf_dim = ncf
-        self.num_residual = cfg.GAN.R_NUM  ### ????? what is R_NUM
-        self.define_module()
-
-    def make_layer(self, block, channel_num):
-        layers = []
-        for i in range(cfg.GAN.R_NUM):
-            layers.append(block(channel_num))
-
-        return nn.Sequential(*layers)
-
-    def define_module(self):
-        ngf = self.gf_dim
-        self.att = ATT_NET(ngf, self.ef_dim)
-        self.residual = self.make_layer(ResBlock, ngf * 2)
-        self.upsample = upBlock(ngf * 2, ngf)
-
-    def forward(self, h_code, c_code, word_embs, mask):
-        self.att.applyMask(mask)
-        c_code, att = self.att(h_code, word_embs)
-        h_c_code = torch.cat((h_code, c_code), 1)
-        out_code = self.residual(h_c_code)
-
-        # state size ngf/2 * 2in_size * 2in_size
-        out_code = self.upsample(out_code)
-        return out_code, att
 
 
 class G_NET(nn.Module):
@@ -470,6 +470,25 @@ class G_DCGAN(nn.Module):
 
 ######## Discriminator Networks
 
+def Block3x3_leakRelu(in_planes, out_planes):
+    block = nn.Sequential(
+        conv3x3(in_planes, out_planes),
+        nn.BatchNorm2d(out_planes),
+        nn.LeakyReLU(0.2, inplace=True)
+    )
+    return block
+
+
+# Downscale the spatial size by 2
+def downBlock(in_planes, out_planes):
+    block = nn.Sequential(
+        nn.Conv2d(in_planes, out_planes, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(out_planes),
+        nn.LeakyReLU(0.2, inplace=True)
+    )
+    return block
+
+
 # downscale the spatial size by a factor of 16
 def encode_image_by_16times(ndf):
     encode_image = nn.Sequential(
@@ -489,25 +508,6 @@ def encode_image_by_16times(ndf):
     return encode_image
 
 
-def Block3x3_leakyRelu(in_planes, out_planes):
-    block = nn.Sequential(
-        conv3x3(in_planes, out_planes),
-        nn.BatchNorm2d(out_planes),
-        nn.LeakyReLU(0.2, inplace=True)
-    )
-    return block
-
-
-# Downscale the spatial size by 2
-def downBlock(in_planes, out_planes):
-    block = nn.Sequential(
-        nn.Conv2d(in_planes, out_planes, 4, 2, 1, bias=False),
-        nn.BatchNorm2d(out_planes),
-        nn.LeakyReLU(0.2, inplace=True)
-    )
-    return block
-
-
 class D_GET_LOGITS(nn.Module):
     def __init__(self, ndf, nef, bcondition=False):
         super(D_GET_LOGITS, self).__init__()
@@ -515,7 +515,7 @@ class D_GET_LOGITS(nn.Module):
         self.ef_dim = nef
         self.bcondition = bcondition
         if self.bcondition:
-            self.joinConv = Block3x3_leakyRelu(ndf * 8 + nef, ndf * 8)
+            self.joinConv = Block3x3_leakRelu(ndf * 8 + nef, ndf * 8)
 
         self.outlogits = nn.Sequential(
             nn.Conv2d(ndf * 8, 1, kernel_size=4, stride=4),
@@ -561,7 +561,7 @@ class D_NET128(nn.Module):
         nef = cfg.TEXT.EMBEDDING_DIM
         self.img_code_s16 = encode_image_by_16times(ndf)
         self.img_code_s32 = downBlock(ndf * 8, ndf * 16)
-        self.img_code_s32_1 = Block3x3_leakyRelu(ndf * 16, ndf * 8)
+        self.img_code_s32_1 = Block3x3_leakRelu(ndf * 16, ndf * 8)
         if b_jcu:
             self.UNCOND_DNET = D_GET_LOGITS(ndf, nef, bcondition=False)
         else:
@@ -584,8 +584,8 @@ class D_NET256(nn.Module):
         self.img_code_s16 = encode_image_by_16times(ndf)
         self.img_code_s32 = downBlock(ndf * 8, ndf * 16)
         self.img_code_64 = downBlock(ndf * 16, ndf * 32)
-        self.img_code_64_1 = Block3x3_leakyRelu(ndf * 32, ndf * 16)
-        self.img_code_s64_2 = Block3x3_leakyRelu(ndf * 16, ndf * 8)
+        self.img_code_64_1 = Block3x3_leakRelu(ndf * 32, ndf * 16)
+        self.img_code_s64_2 = Block3x3_leakRelu(ndf * 16, ndf * 8)
         if b_jcu:
             self.UNCOND_DNET = D_GET_LOGITS(ndf, nef, bcondition=False)
         else:
