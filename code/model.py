@@ -41,8 +41,7 @@ def upBlock(in_planes, out_planes):
         nn.Upsample(scale_factor=2, mode='nearest'),
         conv3x3(in_planes, out_planes * 2),
         nn.BatchNorm2d(out_planes * 2),
-        GLU()
-    )
+        GLU())
     return block
 
 
@@ -174,7 +173,7 @@ class CNN_ENCODER(nn.Module):
 
         """No gradient calculation. Maybe no updation"""
         for param in model.parameters():
-            param.require_grad = False
+            param.requires_grad = False
         print("Load pretrained model from ", url)
         self.define_module(model)
         self.init_trainable_weights()
@@ -583,8 +582,8 @@ class D_NET256(nn.Module):
         nef = cfg.TEXT.EMBEDDING_DIM
         self.img_code_s16 = encode_image_by_16times(ndf)
         self.img_code_s32 = downBlock(ndf * 8, ndf * 16)
-        self.img_code_64 = downBlock(ndf * 16, ndf * 32)
-        self.img_code_64_1 = Block3x3_leakRelu(ndf * 32, ndf * 16)
+        self.img_code_s64 = downBlock(ndf * 16, ndf * 32)
+        self.img_code_s64_1 = Block3x3_leakRelu(ndf * 32, ndf * 16)
         self.img_code_s64_2 = Block3x3_leakRelu(ndf * 16, ndf * 8)
         if b_jcu:
             self.UNCOND_DNET = D_GET_LOGITS(ndf, nef, bcondition=False)
@@ -596,6 +595,6 @@ class D_NET256(nn.Module):
         x_code16 = self.img_code_s16(x_var)
         x_code8 = self.img_code_s32(x_code16)
         x_code4 = self.img_code_s64(x_code8)
-        x_code4 = self.img_code_64_1(x_code4)
+        x_code4 = self.img_code_s64_1(x_code4)
         x_code4 = self.img_code_s64_2(x_code4)
         return x_code4
