@@ -1,6 +1,8 @@
 # TODO: Future statements
-from easydict import EasyDict as edict
+from __future__ import division
+from __future__ import print_function
 
+from easydict import EasyDict as edict
 import numpy as np
 
 __C = edict()

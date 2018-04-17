@@ -1,14 +1,19 @@
-"""Future terms"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+
 import os
 import numpy.random as random
 
 import pandas as pd
 import numpy as np
-import pickle
 import torch.utils.data as data
 import torchvision.transforms as transforms
 from PIL import Image
-from nltk import RegexpTokenizer, defaultdict
+from nltk import RegexpTokenizer
+from collections import defaultdict
 
 from miscc.config import cfg
 
@@ -16,7 +21,12 @@ import torch
 import torch.utils.data as data
 from torch.autograd import Variable
 import torchvision.transforms as transforms
+import sys
 
+if sys.version_info[0] == 2:
+    import cPickle as pickle
+else:
+    import pickle
 
 def prepare_data(data):
     imgs, captions, captions_lens, class_ids, keys = data

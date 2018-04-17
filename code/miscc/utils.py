@@ -1,12 +1,15 @@
 import os
 import errno
+import numpy as np
+
 import torch.nn as nn
 import torch
+
 from copy import deepcopy
-import numpy as np
-from miscc.config import cfg
 from PIL import Image, ImageDraw, ImageFont
 import skimage.transform
+
+from miscc.config import cfg
 
 # For visualization ################################################
 COLOR_DIC = {0:[128,64,128],  1:[244, 35,232],
